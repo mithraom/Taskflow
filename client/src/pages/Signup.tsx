@@ -1,25 +1,34 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { getPasswordError } from "../utils/validatePassword";
 
 export default function Signup() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [passwordError, setPasswordError] = useState("");
   const { signup } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-    try {
-      await signup(email, password, name);
-      navigate("/dashboard");
-    } catch (err: any) {
-      setError(err.response?.data?.error || "Signup failed");
-    }
-  };
+  e.preventDefault();
+  setError("");
+
+  const pwError = getPasswordError(password);
+  if (pwError) {
+    setPasswordError(pwError);
+    return;
+  }
+
+  try {
+    await signup(email, password, name);
+    navigate("/dashboard");
+  } catch (err: any) {
+    setError(err.response?.data?.error || "Signup failed");
+  }
+};
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-teal-400 via-cyan-500 to-indigo-600 p-4">
@@ -58,13 +67,24 @@ export default function Signup() {
             required
           />
           <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full border-2 border-gray-200 p-3 rounded-xl mb-5 focus:outline-none focus:border-teal-400 transition-colors"
-            required
-          />
+  type="password"
+  placeholder="Password"
+  value={password}
+  onChange={(e) => {
+    setPassword(e.target.value);
+    setPasswordError(e.target.value ? getPasswordError(e.target.value) || "" : "");
+  }}
+  className="w-full border-2 border-gray-200 p-3 rounded-xl focus:outline-none focus:border-teal-400 transition-colors"
+  required
+/>
+{passwordError && (
+  <p className="text-red-500 text-xs mb-4 mt-1">{passwordError}</p>
+)}
+{!passwordError && (
+  <p className="text-gray-400 text-xs mb-4 mt-1">
+    Min 8 characters, with uppercase, lowercase, number & special character
+  </p>
+)}
           <button
             type="submit"
             className="w-full bg-gradient-to-r from-teal-500 to-indigo-600 text-white font-semibold p-3 rounded-xl hover:opacity-90 transition-opacity shadow-lg"

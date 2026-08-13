@@ -4,6 +4,18 @@ import jwt from "jsonwebtoken";
 import User from "../models/User";
 import { authenticate, AuthRequest } from "../middleware/auth";
 
+const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*(),.?":{}|<>]).{8,}$/;
+
+function validatePassword(password: string): string | null {
+  if (!password || password.length < 8) {
+    return "Password must be at least 8 characters long";
+  }
+  if (!PASSWORD_REGEX.test(password)) {
+    return "Password must include an uppercase letter, a lowercase letter, a number, and a special character";
+  }
+  return null;
+}
+
 const router = express.Router();
 
 const ACCESS_SECRET = process.env.JWT_SECRET as string;
@@ -14,8 +26,13 @@ router.post("/signup", async (req: Request, res: Response) => {
     const { email, password, name } = req.body;
 
     if (!email || !password || !name) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
+  return res.status(400).json({ error: "Missing required fields" });
+}
+
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+  return res.status(400).json({ error: passwordError });
+} 
 
     const normalizedEmail = email.trim().toLowerCase();
 
@@ -134,8 +151,9 @@ router.put("/me/password", authenticate, async (req: AuthRequest, res: Response)
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ error: "Current and new password are required" });
     }
-    if (newPassword.length < 6) {
-      return res.status(400).json({ error: "New password must be at least 6 characters" });
+    const passwordError = validatePassword(newPassword);
+    if (passwordError) {
+      return res.status(400).json({ error: passwordError });
     }
 
     const user = await User.findById(req.userId);
