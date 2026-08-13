@@ -56,7 +56,7 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    const socket: Socket = io("http://localhost:5000");
+    const socket: Socket = io(import.meta.env.VITE_API_URL);
 
     socket.on("workspace:created", (workspace: Workspace) => {
       setWorkspaces((prev) => {
