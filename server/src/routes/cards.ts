@@ -10,7 +10,7 @@ router.use(authenticate);
 // CREATE card
 router.post("/", async (req: AuthRequest, res: Response) => {
   try {
-    const { title, listId, position, description, boardId } = req.body;
+    const { title, listId, position, description, boardId, dueDate } = req.body;
     if (!title || !listId || !boardId) {
       return res.status(400).json({ error: "title, listId, and boardId are required" });
     }
@@ -20,11 +20,35 @@ router.post("/", async (req: AuthRequest, res: Response) => {
       list: listId,
       position: position ?? 0,
       description,
+      dueDate,
     });
 
     getIO().to(`board:${boardId}`).emit("card:created", card);
 
     res.status(201).json(card);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong" });
+  }
+});
+
+// SEARCH cards by title
+router.get("/search", async (req: AuthRequest, res: Response) => {
+  try {
+    const query = req.query.q as string | undefined;
+    if (!query || !query.trim()) return res.json([]);
+
+    const cards = await Card.find({
+      title: { $regex: query, $options: "i" },
+    })
+      .populate({
+        path: "list",
+        select: "title board",
+        populate: { path: "board", select: "title workspace" },
+      })
+      .limit(30);
+
+    res.json(cards);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Something went wrong" });
@@ -42,16 +66,17 @@ router.get("/list/:listId", async (req: AuthRequest, res: Response) => {
   }
 });
 
-// UPDATE card (title, description, position, list — for drag-and-drop moves, assignee)
+// UPDATE card (title, description, dueDate, position, list — for drag-and-drop moves, assignee)
 router.put("/:id", async (req: AuthRequest, res: Response) => {
   try {
-    const { title, description, position, listId, assignee, boardId } = req.body;
+    const { title, description, position, listId, assignee, boardId, dueDate } = req.body;
     const update: any = {};
     if (title !== undefined) update.title = title;
     if (description !== undefined) update.description = description;
     if (position !== undefined) update.position = position;
     if (listId !== undefined) update.list = listId;
     if (assignee !== undefined) update.assignee = assignee;
+    if (dueDate !== undefined) update.dueDate = dueDate;
 
     const card = await Card.findByIdAndUpdate(req.params.id, update, { new: true });
     if (!card) return res.status(404).json({ error: "Card not found" });

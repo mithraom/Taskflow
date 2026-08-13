@@ -9,6 +9,7 @@ import workspaceRoutes from "./routes/workspaces";
 import boardRoutes from "./routes/boards";
 import listRoutes from "./routes/lists";
 import cardRoutes from "./routes/cards";
+import commentRoutes from "./routes/comments";
 
 const app = express();
 const httpServer = createServer(app);
@@ -27,6 +28,7 @@ app.use("/api/workspaces", workspaceRoutes);
 app.use("/api/boards", boardRoutes);
 app.use("/api/lists", listRoutes);
 app.use("/api/cards", cardRoutes);
+app.use("/api/comments", commentRoutes);
 
 const PORT = process.env.PORT || 5000;
 const MONGODB_URI = process.env.MONGODB_URI as string;

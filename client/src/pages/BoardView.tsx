@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { io, Socket } from "socket.io-client";
 import {
@@ -18,6 +18,8 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import api from "../api/axios";
+import { useAuth } from "../context/AuthContext";
+import CardModal from "../components/CardModal";
 
 interface List {
   _id: string;
@@ -29,16 +31,65 @@ interface Card {
   _id: string;
   title: string;
   description?: string;
+  dueDate?: string;
   position: number;
   list: string;
+}
+
+const AVATAR_COLORS = [
+  "bg-red-400", "bg-orange-400", "bg-amber-400", "bg-emerald-400",
+  "bg-teal-400", "bg-blue-400", "bg-indigo-400", "bg-purple-400", "bg-pink-400",
+];
+
+const LIST_BAR_COLORS = [
+  "bg-rose-400", "bg-orange-400", "bg-amber-400", "bg-lime-400",
+  "bg-teal-400", "bg-sky-400", "bg-indigo-400", "bg-fuchsia-400",
+];
+
+function colorForName(name: string) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
+function barColorFor(id: string) {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = id.charCodeAt(i) + ((hash << 5) - hash);
+  return LIST_BAR_COLORS[Math.abs(hash) % LIST_BAR_COLORS.length];
+}
+
+function PresenceBar({ viewers }: { viewers: string[] }) {
+  if (viewers.length === 0) return null;
+  return (
+    <div className="flex items-center -space-x-2">
+      {viewers.slice(0, 5).map((name, i) => (
+        <div
+          key={i}
+          title={name}
+          className={`w-8 h-8 rounded-full ${colorForName(name)} border-2 border-white flex items-center justify-center text-xs font-bold text-white shadow-md`}
+        >
+          {name.charAt(0).toUpperCase()}
+        </div>
+      ))}
+      {viewers.length > 5 && (
+        <div className="w-8 h-8 rounded-full bg-gray-300 border-2 border-white flex items-center justify-center text-xs font-bold text-gray-700">
+          +{viewers.length - 5}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function SortableCard({
   card,
   onDelete,
+  onOpen,
+  isHighlighted,
 }: {
   card: Card;
   onDelete: (id: string) => void;
+  onOpen: (card: Card) => void;
+  isHighlighted: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: card._id,
@@ -57,12 +108,23 @@ function SortableCard({
       style={style}
       {...attributes}
       {...listeners}
-      className="group/card relative bg-gray-50 border rounded p-2 pr-6 text-sm hover:border-blue-400 transition-colors cursor-grab active:cursor-grabbing"
+      onClick={() => onOpen(card)}
+      className={`group/card relative bg-white border-2 rounded-lg p-2.5 pr-6 text-sm shadow-sm hover:shadow-md transition-all cursor-grab active:cursor-grabbing ${
+        isHighlighted ? "ring-4 ring-fuchsia-300 border-fuchsia-400 bg-fuchsia-50" : "border-transparent hover:border-indigo-300"
+      }`}
     >
       {card.title}
+      {card.dueDate && (
+        <span className="block text-[10px] text-gray-400 mt-1 font-medium">
+          📅 {new Date(card.dueDate).toLocaleDateString()}
+        </span>
+      )}
       <button
         onPointerDown={(e) => e.stopPropagation()}
-        onClick={() => onDelete(card._id)}
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete(card._id);
+        }}
         className="absolute top-2 right-1.5 text-gray-300 hover:text-red-500 opacity-0 group-hover/card:opacity-100 transition-opacity text-xs"
         title="Delete card"
       >
@@ -80,6 +142,8 @@ function DroppableList({
   onCreateCard,
   onDeleteCard,
   onDeleteList,
+  onOpenCard,
+  highlightedIds,
 }: {
   list: List;
   cards: Card[];
@@ -88,6 +152,8 @@ function DroppableList({
   onCreateCard: () => void;
   onDeleteCard: (id: string) => void;
   onDeleteList: () => void;
+  onOpenCard: (card: Card) => void;
+  highlightedIds: Set<string>;
 }) {
   const { setNodeRef } = useSortable({
     id: list._id,
@@ -95,12 +161,13 @@ function DroppableList({
   });
 
   return (
-    <div className="bg-white rounded-lg shadow-md p-4 w-72 flex-shrink-0 group/list">
-      <div className="flex justify-between items-center mb-3">
-        <h3 className="font-semibold">{list.title}</h3>
+    <div className="bg-white/90 backdrop-blur rounded-2xl shadow-lg p-3 w-72 flex-shrink-0 group/list overflow-hidden">
+      <div className={`h-1.5 -m-3 mb-3 ${barColorFor(list._id)}`}></div>
+      <div className="flex justify-between items-center mb-3 px-1">
+        <h3 className="font-bold text-gray-700 text-sm tracking-wide uppercase">{list.title}</h3>
         <button
           onClick={onDeleteList}
-          className="text-gray-300 hover:text-red-500 text-xs opacity-0 group-hover/list:opacity-100 transition-opacity"
+          className="text-gray-300 hover:text-red-500 text-xs opacity-0 group-hover/list:opacity-100 transition-opacity font-medium"
           title="Delete list"
         >
           Delete
@@ -113,7 +180,13 @@ function DroppableList({
           strategy={verticalListSortingStrategy}
         >
           {cards.map((card) => (
-            <SortableCard key={card._id} card={card} onDelete={onDeleteCard} />
+            <SortableCard
+              key={card._id}
+              card={card}
+              onDelete={onDeleteCard}
+              onOpen={onOpenCard}
+              isHighlighted={highlightedIds.has(card._id)}
+            />
           ))}
         </SortableContext>
       </div>
@@ -127,11 +200,11 @@ function DroppableList({
           onKeyDown={(e) => {
             if (e.key === "Enter") onCreateCard();
           }}
-          className="flex-1 border p-1.5 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+          className="flex-1 border-2 border-gray-200 p-1.5 rounded-lg text-sm bg-white focus:outline-none focus:border-fuchsia-400 transition-colors"
         />
         <button
           onClick={onCreateCard}
-          className="bg-gray-200 px-2 rounded text-sm hover:bg-gray-300 transition-colors"
+          className="bg-gray-100 px-3 rounded-lg text-sm hover:bg-gray-200 transition-colors font-medium"
         >
           +
         </button>
@@ -143,16 +216,33 @@ function DroppableList({
 export default function BoardView() {
   const { boardId } = useParams<{ boardId: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [lists, setLists] = useState<List[]>([]);
   const [cardsByList, setCardsByList] = useState<Record<string, Card[]>>({});
   const [newListTitle, setNewListTitle] = useState("");
   const [newCardTitles, setNewCardTitles] = useState<Record<string, string>>({});
   const [socket, setSocket] = useState<Socket | null>(null);
   const [activeCard, setActiveCard] = useState<Card | null>(null);
+  const [viewers, setViewers] = useState<string[]>([]);
+  const [highlightedIds, setHighlightedIds] = useState<Set<string>>(new Set());
+  const [selectedCard, setSelectedCard] = useState<Card | null>(null);
+  const highlightTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
+
+  const flashHighlight = (cardId: string) => {
+    setHighlightedIds((prev) => new Set(prev).add(cardId));
+    if (highlightTimers.current[cardId]) clearTimeout(highlightTimers.current[cardId]);
+    highlightTimers.current[cardId] = setTimeout(() => {
+      setHighlightedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(cardId);
+        return next;
+      });
+    }, 1200);
+  };
 
   const loadBoardData = useCallback(async () => {
     if (!boardId) return;
@@ -178,7 +268,11 @@ export default function BoardView() {
     setSocket(newSocket);
 
     newSocket.on("connect", () => {
-      newSocket.emit("join-board", boardId);
+      newSocket.emit("join-board", { boardId, userName: user?.name || "Guest" });
+    });
+
+    newSocket.on("presence:update", (names: string[]) => {
+      setViewers(names);
     });
 
     newSocket.on("card:created", (card: Card) => {
@@ -187,6 +281,7 @@ export default function BoardView() {
         if (existing.some((c) => c._id === card._id)) return prev;
         return { ...prev, [card.list]: [...existing, card] };
       });
+      flashHighlight(card._id);
     });
 
     newSocket.on("card:updated", (updatedCard: Card) => {
@@ -200,6 +295,7 @@ export default function BoardView() {
         );
         return next;
       });
+      flashHighlight(updatedCard._id);
     });
 
     newSocket.on("card:deleted", ({ id }: { id: string }) => {
@@ -237,7 +333,7 @@ export default function BoardView() {
       newSocket.emit("leave-board", boardId);
       newSocket.disconnect();
     };
-  }, [boardId]);
+  }, [boardId, user?.name]);
 
   const handleCreateList = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -355,19 +451,23 @@ export default function BoardView() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 p-8">
-      <div className="mb-6 flex items-center gap-4">
-        <button
-          onClick={() => navigate("/dashboard")}
-          className="text-blue-600 hover:underline"
-        >
-          ← Back to Dashboard
-        </button>
-        {socket?.connected && (
-          <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
-            Live
-          </span>
-        )}
+    <div className="min-h-screen bg-gradient-to-br from-teal-400 via-cyan-500 to-indigo-600 p-8">
+      <div className="mb-6 flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => navigate("/dashboard")}
+            className="text-white font-semibold hover:underline bg-black/20 px-3 py-1.5 rounded-lg backdrop-blur"
+          >
+            ← Dashboard
+          </button>
+          {socket?.connected && (
+            <span className="text-xs bg-white/90 text-green-700 px-2.5 py-1 rounded-full font-bold flex items-center gap-1 shadow-sm">
+              <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
+              Live
+            </span>
+          )}
+        </div>
+        <PresenceBar viewers={viewers} />
       </div>
 
       <DndContext
@@ -391,6 +491,8 @@ export default function BoardView() {
                 onCreateCard={() => handleCreateCard(list._id)}
                 onDeleteCard={handleDeleteCard}
                 onDeleteList={() => handleDeleteList(list._id)}
+                onOpenCard={setSelectedCard}
+                highlightedIds={highlightedIds}
               />
             ))}
 
@@ -400,19 +502,28 @@ export default function BoardView() {
               placeholder="+ Add another list"
               value={newListTitle}
               onChange={(e) => setNewListTitle(e.target.value)}
-              className="w-full border p-2 rounded bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+              className="w-full border-2 border-white/40 p-2.5 rounded-xl bg-white/20 backdrop-blur text-white placeholder-white/80 font-medium focus:outline-none focus:border-white transition-colors"
             />
           </form>
         </div>
 
         <DragOverlay>
           {activeCard ? (
-            <div className="bg-white border-2 border-blue-400 rounded p-2 text-sm shadow-lg w-64">
+            <div className="bg-white border-2 border-fuchsia-400 rounded-lg p-2.5 text-sm shadow-2xl w-64">
               {activeCard.title}
             </div>
           ) : null}
         </DragOverlay>
       </DndContext>
+
+      {selectedCard && boardId && (
+        <CardModal
+          card={selectedCard}
+          boardId={boardId}
+          onClose={() => setSelectedCard(null)}
+          onUpdated={loadBoardData}
+        />
+      )}
     </div>
   );
 }
